@@ -10,15 +10,19 @@
 const char *image_window = "Source Image";
 const char *result_window = "Result window";
 
-void maskOn(cv::Point matchLoc, const cv::Mat& cboxmask, cv::Mat& card)
+void maskOn(cv::Rect checkboxArea, const cv::Mat& cboxmask, cv::Mat& card)
 {
-    // extract image
+    // crop checkbox region image
+    cv::Mat croppedImage = card(checkboxArea);
 
-    //cv::Rect checkboxArea(matchLoc.x, matchLoc.y, cboxes.cols, cboxes.rows);
-    //c::Mat croppedImage = card(checkboxArea);
+    // checkbox mask
+    cv::Mat checksonly = cv::Mat::zeros(croppedImage.size(), croppedImage.type());
+    croppedImage.copyTo(checksonly, cboxmask);
+
+    cv::imshow(image_window, checksonly);
 }
 
-cv::Point matchCard(int method, const cv::Mat& cboxes, cv::Mat& card)
+cv::Rect matchCard(int method, const cv::Mat& cboxes, cv::Mat& card)
 {
     // create result matrix
     int result_cols =  card.cols - cboxes.cols + 1;
@@ -45,7 +49,9 @@ cv::Point matchCard(int method, const cv::Mat& cboxes, cv::Mat& card)
 
     cv::imshow(image_window, card);
     // cv::imshow(result_window, result);
-    return matchLoc;
+
+    cv::Rect checkboxArea(matchLoc.x, matchLoc.y, cboxes.cols, cboxes.rows);
+    return checkboxArea;
 }
 
 int main(int argc, char* argv[])
@@ -72,7 +78,7 @@ int main(int argc, char* argv[])
         return -1;
     }
 
-    boost::filesystem::path checkboxmask (argv[2]);
+    boost::filesystem::path checkboxmask (argv[3]);
     if (!is_regular_file(checkboxmask))
     {
         std::cout << "Third arg must be file." << std::endl;
@@ -92,6 +98,7 @@ int main(int argc, char* argv[])
         std::cout << "Could not open or find cboxmask.png" << std::endl;
         return -1;
     }
+    cboxmask = cboxmask > 128;
 
     auto sz = cboxes.size();
     std::cout << sz.width << "x" << sz.height << std::endl;
@@ -117,10 +124,10 @@ int main(int argc, char* argv[])
                 return -1;
             }
 
-            cv::Point matchLoc = matchCard(cv::TM_CCOEFF, cboxes, card);
-            cv::waitKey(1);
+            cv::Rect matchLoc = matchCard(cv::TM_CCOEFF, cboxes, card);
+            cv::waitKey(1000);
             maskOn(matchLoc, cboxmask, card);
-            cv::waitKey(1);
+            cv::waitKey(1000);
         }
     }
 
