@@ -10,48 +10,88 @@
 const char *image_window = "Source Image";
 const char *result_window = "Result window";
 
-void maskOn(cv::Rect checkboxArea, const cv::Mat& cboxmask, cv::Mat& card)
+void maskOn(cv::Mat matchArea, const cv::Mat& cboxmask, cv::Mat& card)
 {
-    // crop checkbox region image
-    cv::Mat croppedImage = card(checkboxArea);
-
     // checkbox mask
-    cv::Mat checksonly = cv::Mat::zeros(croppedImage.size(), croppedImage.type());
-    croppedImage.copyTo(checksonly, cboxmask);
+    cv::Mat checksonly = cv::Mat::zeros(matchArea.size(), matchArea.type());
+    matchArea.copyTo(checksonly, cboxmask);
 
     cv::imshow(image_window, checksonly);
 }
 
-cv::Rect matchCard(int method, const cv::Mat& cboxes, cv::Mat& card)
+cv::Mat rotateImg(cv::Mat src, int deg) {
+    // get rotation matrix for rotating the image around its center
+    cv::Point center(src.cols/2.0, src.rows/2.0);
+    cv::Mat rot = cv::getRotationMatrix2D(center, deg, 1.0);
+    // determine bounding rectangle
+    cv::Rect bbox = cv::RotatedRect(center, src.size(), deg).boundingRect();
+    // adjuct transformation matrix
+    rot.at<double>(0,2) += bbox.width/2.0 - center.x;
+    rot.at<double>(1,2) += bbox.height/2.0 - center.y;
+
+    cv::Mat dst;
+    cv::warpAffine(src, dst, rot, bbox.size());
+    return dst;
+}
+
+cv::Mat matchCard(int method, const cv::Mat& cboxes, cv::Mat& card)
 {
-    // create result matrix
-    int result_cols =  card.cols - cboxes.cols + 1;
-    int result_rows = card.rows - cboxes.rows + 1;
-    cv::Mat result(result_rows, result_cols, CV_32FC1);
+    int maxAngle = 5;
 
-    /// Do the Matching and Normalize
-    cv::matchTemplate(card, cboxes, result, method);
-    cv::normalize(result, result, 0, 1, cv::NORM_MINMAX, -1, cv::Mat());
+    double maxVals [maxAngle * 2];
+    cv::Point matchLocs [maxAngle * 2];
+    for (int deg = -maxAngle; deg <= maxAngle; deg++) {
+        // create result matrix
+        int result_cols =  card.cols - cboxes.cols + 1;
+        int result_rows = card.rows - cboxes.rows + 1;
+        cv::Mat result(result_rows, result_cols, CV_32FC1);
 
-    // find best match
-    double minVal; double maxVal;
-    cv::Point minLoc;
-    cv::Point maxLoc;
+        // rotate obj to match
+        cv::Mat cboxrot = rotateImg(cboxes,deg);
 
-    cv::minMaxLoc(result, &minVal, &maxVal, &minLoc, &maxLoc, cv::Mat());
+        // Do the Matching and Normalize
+        cv::matchTemplate(card, cboxrot, result, method);
+        // cv::normalize(result, result, 0, 1, cv::NORM_MINMAX, -1, cv::Mat());
 
-    cv::Point matchLoc = maxLoc;
+        // find best match
+        double minVal; double maxVal;
+        cv::Point minLoc;
+        cv::Point maxLoc;
 
-    // show the rect
-    cv::rectangle(card, matchLoc,
-            cv::Point(matchLoc.x + cboxes.cols, matchLoc.y + cboxes.rows),
-            cv::Scalar::all(0), 2, 8, 0);
+        cv::minMaxLoc(result, &minVal, &maxVal, &minLoc, &maxLoc, cv::Mat());
 
-    cv::imshow(image_window, card);
-    // cv::imshow(result_window, result);
+        // store rotation's match
+        maxVals[deg + maxAngle] = maxVal;
+        matchLocs[deg + maxAngle] = maxLoc;
+    }
 
-    cv::Rect checkboxArea(matchLoc.x, matchLoc.y, cboxes.cols, cboxes.rows);
-    return checkboxArea;
+    // find best rotation match
+    double curMax = 0;
+    cv::Point matchLoc;
+    int angle = 0;
+    std::cout << "maxVals ";
+    for (int i = 0; i < maxAngle * 2; i++)
+        std::cout << maxVals[i] << " ";
+    std::cout << std::endl;
+    for (int i = 0; i <= maxAngle * 2; i++) {
+        double val = maxVals[i];
+        if (val > curMax) {
+            curMax = val;
+            matchLoc = matchLocs[i];
+            angle = i - maxAngle;
+        }
+    }
+    std::cout << "angle " << angle << std::endl;
+
+    cv::Mat cboxrot = rotateImg(cboxes, angle);
+    // get center
+    cv::Point center(matchLoc.x + cboxrot.cols/2.0, matchLoc.y + cboxrot.rows/2.0);
+    cv::Mat M = cv::getRotationMatrix2D(center, angle, 1.0);
+    cv::Mat rotated, cropped;
+    cv::warpAffine(card, rotated, M, card.size(), cv::INTER_CUBIC);
+    cv::getRectSubPix(rotated, cboxes.size(), center, cropped);
+    cv::imshow(image_window, cropped);
+    return cropped;
 }
 
 int main(int argc, char* argv[])
@@ -124,9 +164,9 @@ int main(int argc, char* argv[])
                 return -1;
             }
 
-            cv::Rect matchLoc = matchCard(cv::TM_CCOEFF, cboxes, card);
+            cv::Mat matchArea = matchCard(cv::TM_CCOEFF, cboxes, card);
             cv::waitKey(1000);
-            maskOn(matchLoc, cboxmask, card);
+            maskOn(matchArea, cboxmask, card);
             cv::waitKey(1000);
         }
     }
